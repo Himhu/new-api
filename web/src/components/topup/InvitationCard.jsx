@@ -150,7 +150,7 @@ const InvitationCard = ({
                       className='text-base sm:text-2xl font-bold mb-2'
                       style={{ color: 'white' }}
                     >
-                      {userState?.user?.aff_count || 0}
+                      {userState?.user?.invited_count || 0}
                     </div>
                     <div className='flex items-center justify-center text-sm'>
                       <Users
@@ -202,7 +202,7 @@ const InvitationCard = ({
             <div className='flex items-start gap-2'>
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
-                {t('邀请好友注册，好友充值后您可获得相应奖励')}
+                {t('邀请好友注册并在首次成功付费后，您可获得相应奖励')}
               </Text>
             </div>
 
