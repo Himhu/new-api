@@ -16,17 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Modal,
   Table,
   Badge,
   Typography,
   Toast,
   Empty,
   Button,
-  Input,
+  Form,
   Tag,
+  Modal,
 } from '@douyinfe/semi-ui';
 import {
   IllustrationNoResult,
@@ -34,12 +34,13 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { Coins } from 'lucide-react';
 import { IconSearch } from '@douyinfe/semi-icons';
-import { API, timestamp2string } from '../../../helpers';
-import { isAdmin } from '../../../helpers/utils';
-import { useIsMobile } from '../../../hooks/common/useIsMobile';
+import { API, timestamp2string } from '../../helpers';
+import { isAdmin, createCardProPagination } from '../../helpers/utils';
+import CardPro from '../common/ui/CardPro';
+import { useIsMobile } from '../../hooks/common/useIsMobile';
+
 const { Text } = Typography;
 
-// 状态映射配置
 const STATUS_CONFIG = {
   success: { type: 'success', key: '成功' },
   pending: { type: 'warning', key: '待支付' },
@@ -47,7 +48,6 @@ const STATUS_CONFIG = {
   expired: { type: 'danger', key: '已过期' },
 };
 
-// 支付方式映射
 const PAYMENT_METHOD_MAP = {
   stripe: 'Stripe',
   creem: 'Creem',
@@ -56,22 +56,29 @@ const PAYMENT_METHOD_MAP = {
   wxpay: '微信',
 };
 
-const TopupHistoryModal = ({ visible, onCancel, t }) => {
+const TopupHistoryContent = ({ t, enabled = true, selfOnly = false }) => {
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [topups, setTopups] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
-  const isMobile = useIsMobile();
+  const [searching, setSearching] = useState(false);
+  const userIsAdmin = useMemo(() => isAdmin(), []);
+  const formApiRef = useRef(null);
 
-  const loadTopups = async (currentPage, currentPageSize) => {
+  const loadTopups = async (currentPage, currentPageSize, currentKeyword) => {
     setLoading(true);
     try {
-      const base = isAdmin() ? '/api/user/topup' : '/api/user/topup/self';
+      const base = selfOnly
+        ? '/api/user/topup/self'
+        : userIsAdmin
+          ? '/api/user/topup'
+          : '/api/user/topup/self';
       const qs =
         `p=${currentPage}&page_size=${currentPageSize}` +
-        (keyword ? `&keyword=${encodeURIComponent(keyword)}` : '');
+        (currentKeyword ? `&keyword=${encodeURIComponent(currentKeyword)}` : '');
       const endpoint = `${base}?${qs}`;
       const res = await API.get(endpoint);
       const { success, message, data } = res.data;
@@ -89,10 +96,11 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   };
 
   useEffect(() => {
-    if (visible) {
-      loadTopups(page, pageSize);
+    if (!enabled) {
+      return;
     }
-  }, [visible, page, pageSize, keyword]);
+    loadTopups(page, pageSize, keyword);
+  }, [enabled, page, pageSize, keyword, selfOnly]);
 
   const handlePageChange = (currentPage) => {
     setPage(currentPage);
@@ -103,12 +111,23 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     setPage(1);
   };
 
-  const handleKeywordChange = (value) => {
-    setKeyword(value);
-    setPage(1);
+  const searchTopups = (targetPage) => {
+    const values = formApiRef.current?.getValues() || {};
+    const kw = (values.searchKeyword || '').trim();
+    setSearching(true);
+    setKeyword(kw);
+    if (targetPage) setPage(targetPage);
+    setSearching(false);
   };
 
-  // 管理员补单
+  const handleReset = () => {
+    if (!formApiRef.current) return;
+    formApiRef.current.reset();
+    setTimeout(() => {
+      searchTopups(1);
+    }, 100);
+  };
+
   const handleAdminComplete = async (tradeNo) => {
     try {
       const res = await API.post('/api/user/topup/complete', {
@@ -117,7 +136,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       const { success, message } = res.data;
       if (success) {
         Toast.success({ content: t('补单成功') });
-        await loadTopups(page, pageSize);
+        await loadTopups(page, pageSize, keyword);
       } else {
         Toast.error({ content: message || t('补单失败') });
       }
@@ -134,7 +153,6 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     });
   };
 
-  // 渲染状态徽章
   const renderStatusBadge = (status) => {
     const config = STATUS_CONFIG[status] || { type: 'primary', key: status };
     return (
@@ -145,7 +163,6 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     );
   };
 
-  // 渲染支付方式
   const renderPaymentMethod = (pm) => {
     const displayName = PAYMENT_METHOD_MAP[pm];
     return <Text>{displayName ? t(displayName) : pm || '-'}</Text>;
@@ -155,9 +172,6 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     const tradeNo = (record?.trade_no || '').toLowerCase();
     return Number(record?.amount || 0) === 0 && tradeNo.startsWith('sub');
   };
-
-  // 检查是否为管理员
-  const userIsAdmin = useMemo(() => isAdmin(), []);
 
   const columns = useMemo(() => {
     const baseColumns = [
@@ -180,7 +194,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         render: (amount, record) => {
           if (isSubscriptionTopup(record)) {
             return (
-              <Tag color='purple' shape='circle' size='small'>
+              <Tag shape='circle' size='small'>
                 {t('订阅套餐')}
               </Tag>
             );
@@ -207,8 +221,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       },
     ];
 
-    // 管理员才显示操作列
-    if (userIsAdmin) {
+    if (userIsAdmin && !selfOnly) {
       baseColumns.push({
         title: t('操作'),
         key: 'action',
@@ -217,14 +230,14 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           if (record.status === 'pending') {
             actions.push(
               <Button
-                key="complete"
+                key='complete'
                 size='small'
                 type='primary'
                 theme='outline'
                 onClick={() => confirmAdminComplete(record.trade_no)}
               >
                 {t('补单')}
-              </Button>
+              </Button>,
             );
           }
           return actions.length > 0 ? <>{actions}</> : null;
@@ -240,39 +253,86 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     });
 
     return baseColumns;
-  }, [t, userIsAdmin]);
+  }, [keyword, page, pageSize, selfOnly, t, userIsAdmin]);
 
   return (
-    <Modal
-      title={t('充值账单')}
-      visible={visible}
-      onCancel={onCancel}
-      footer={null}
-      size={isMobile ? 'full-width' : 'large'}
+    <CardPro
+      type='type1'
+      descriptionArea={
+        <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
+          <div className='flex items-center text-blue-500'>
+            <Coins size={16} className='mr-2' />
+            <Text>{t('充值账单')}</Text>
+          </div>
+        </div>
+      }
+      actionsArea={
+        <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
+          <div className='w-full md:w-full lg:w-auto order-1 md:order-2'>
+            <Form
+              getFormApi={(api) => {
+                formApiRef.current = api;
+              }}
+              onSubmit={() => searchTopups(1)}
+              allowEmpty={true}
+              autoComplete='off'
+              layout='horizontal'
+              trigger='change'
+              stopValidateWithError={false}
+              className='w-full md:w-auto order-1 md:order-2'
+            >
+              <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto'>
+                <div className='relative w-full md:w-56'>
+                  <Form.Input
+                    field='searchKeyword'
+                    prefix={<IconSearch />}
+                    placeholder={t('订单号')}
+                    showClear
+                    pure
+                    size='small'
+                  />
+                </div>
+                <div className='flex gap-2 w-full md:w-auto'>
+                  <Button
+                    type='tertiary'
+                    htmlType='submit'
+                    loading={loading || searching}
+                    className='flex-1 md:flex-initial md:w-auto'
+                    size='small'
+                  >
+                    {t('查询')}
+                  </Button>
+                  <Button
+                    type='tertiary'
+                    onClick={handleReset}
+                    className='flex-1 md:flex-initial md:w-auto'
+                    size='small'
+                  >
+                    {t('重置')}
+                  </Button>
+                </div>
+              </div>
+            </Form>
+          </div>
+        </div>
+      }
+      paginationArea={createCardProPagination({
+        currentPage: page,
+        pageSize: pageSize,
+        total: total,
+        onPageChange: handlePageChange,
+        onPageSizeChange: handlePageSizeChange,
+        isMobile: isMobile,
+        t: t,
+      })}
+      t={t}
     >
-      <div className='mb-3'>
-        <Input
-          prefix={<IconSearch />}
-          placeholder={t('订单号')}
-          value={keyword}
-          onChange={handleKeywordChange}
-          showClear
-        />
-      </div>
       <Table
         columns={columns}
         dataSource={topups}
         loading={loading}
         rowKey='id'
-        pagination={{
-          currentPage: page,
-          pageSize: pageSize,
-          total: total,
-          showSizeChanger: true,
-          pageSizeOpts: [10, 20, 50, 100],
-          onPageChange: handlePageChange,
-          onPageSizeChange: handlePageSizeChange,
-        }}
+        pagination={false}
         size='small'
         empty={
           <Empty
@@ -281,12 +341,12 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
               <IllustrationNoResultDark style={{ width: 150, height: 150 }} />
             }
             description={t('暂无充值记录')}
-            style={{ padding: 30 }}
+            style={{ padding: 24 }}
           />
         }
       />
-    </Modal>
+    </CardPro>
   );
 };
 
-export default TopupHistoryModal;
+export default TopupHistoryContent;

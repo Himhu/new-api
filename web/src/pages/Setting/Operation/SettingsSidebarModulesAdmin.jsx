@@ -57,6 +57,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     personal: {
       enabled: true,
       topup: true,
+      'topup-history': true,
       personal: true,
     },
     admin: {
@@ -119,6 +120,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       personal: {
         enabled: true,
         topup: true,
+        'topup-history': true,
         personal: true,
       },
       admin: {
@@ -249,6 +251,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        {
+          key: 'topup-history',
+          title: t('充值账单'),
+          description: t('查看个人充值账单'),
+        },
         {
           key: 'personal',
           title: t('个人设置'),

@@ -43,6 +43,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   personal: {
     enabled: true,
     topup: true,
+    'topup-history': true,
     personal: true,
   },
   admin: {

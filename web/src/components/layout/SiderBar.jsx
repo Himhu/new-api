@@ -49,6 +49,7 @@ const routerMap = {
   deployment: '/console/deployment',
   playground: '/console/playground',
   personal: '/console/personal',
+  'topup-history': '/console/personal/topup-history',
   'group-monitoring': '/console/group-monitoring',
 };
 
@@ -139,6 +140,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('个人设置'),
         itemKey: 'personal',
         to: '/personal',
+      },
+      {
+        text: t('充值账单'),
+        itemKey: 'topup-history',
+        to: '/console/personal/topup-history',
       },
     ];
 
