@@ -50,6 +50,7 @@ const routerMap = {
   playground: '/console/playground',
   personal: '/console/personal',
   'topup-history': '/console/personal/topup-history',
+  'invite-reward': '/console/personal/invite-reward',
   'group-monitoring': '/console/group-monitoring',
 };
 
@@ -137,14 +138,19 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/topup',
       },
       {
-        text: t('个人设置'),
-        itemKey: 'personal',
-        to: '/personal',
-      },
-      {
         text: t('充值账单'),
         itemKey: 'topup-history',
         to: '/console/personal/topup-history',
+      },
+      {
+        text: t('邀请奖励'),
+        itemKey: 'invite-reward',
+        to: '/console/personal/invite-reward',
+      },
+      {
+        text: t('个人设置'),
+        itemKey: 'personal',
+        to: '/personal',
       },
     ];
 

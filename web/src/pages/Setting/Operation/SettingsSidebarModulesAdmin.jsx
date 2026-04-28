@@ -58,6 +58,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       enabled: true,
       topup: true,
       'topup-history': true,
+      'invite-reward': true,
       personal: true,
     },
     admin: {
@@ -121,6 +122,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         enabled: true,
         topup: true,
         'topup-history': true,
+        'invite-reward': true,
         personal: true,
       },
       admin: {
@@ -192,7 +194,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             task: true,
             'group-monitoring': true,
           },
-          personal: { enabled: true, topup: true, personal: true },
+          personal: { enabled: true, topup: true, 'topup-history': true, 'invite-reward': true, personal: true },
           admin: {
             enabled: true,
             channel: true,
@@ -255,6 +257,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'topup-history',
           title: t('充值账单'),
           description: t('查看个人充值账单'),
+        },
+        {
+          key: 'invite-reward',
+          title: t('邀请奖励'),
+          description: t('邀请奖励页面'),
         },
         {
           key: 'personal',

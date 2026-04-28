@@ -44,6 +44,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     enabled: true,
     topup: true,
     'topup-history': true,
+    'invite-reward': true,
     personal: true,
   },
   admin: {
