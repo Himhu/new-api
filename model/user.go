@@ -321,6 +321,28 @@ func GetInvitedUserCountByInviterId(inviterId int) (int64, error) {
 	return count, err
 }
 
+type InvitedUserInfo struct {
+	Id           int    `json:"id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"display_name"`
+	Status       int    `json:"status"`
+	RewardStatus string `json:"reward_status"`
+}
+
+func GetInvitedUsersByInviterId(inviterId int) ([]InvitedUserInfo, error) {
+	if inviterId <= 0 {
+		return []InvitedUserInfo{}, nil
+	}
+	var users []InvitedUserInfo
+	err := DB.Model(&User{}).
+		Select("users.id, users.username, users.display_name, users.status, COALESCE(invite_reward_records.status, 'pending') as reward_status").
+		Joins("LEFT JOIN invite_reward_records ON users.id = invite_reward_records.invitee_user_id").
+		Where("users.inviter_id = ?", inviterId).
+		Order("users.id DESC").
+		Find(&users).Error
+	return users, err
+}
+
 func DeleteUserById(id int) (err error) {
 	if id == 0 {
 		return errors.New("id 为空！")

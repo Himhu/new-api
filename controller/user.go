@@ -430,6 +430,22 @@ func GetSelf(c *gin.Context) {
 	return
 }
 
+func GetInvitedUsers(c *gin.Context) {
+	id := c.GetInt("id")
+	users, err := model.GetInvitedUsersByInviterId(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if users == nil {
+		users = []model.InvitedUserInfo{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    users,
+	})
+}
+
 // 计算用户权限的辅助函数
 func calculateUserPermissions(userRole int) map[string]interface{} {
 	permissions := map[string]interface{}{}

@@ -30,6 +30,7 @@ const InviteRewardPage = () => {
   const [affLink, setAffLink] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
   const [transferAmount, setTransferAmount] = useState(0);
+  const [invitedUsers, setInvitedUsers] = useState([]);
   const affFetchedRef = useRef(false);
 
   const getUserQuota = async () => {
@@ -84,6 +85,16 @@ const InviteRewardPage = () => {
     getAffLink();
   }, []);
 
+  useEffect(() => {
+    API.get('/api/user/invited')
+      .then((res) => {
+        if (res.data.success) {
+          setInvitedUsers(res.data.data || []);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className='mt-[60px] px-2'>
       <div className='w-full max-w-7xl mx-auto'>
@@ -94,6 +105,7 @@ const InviteRewardPage = () => {
           setOpenTransfer={setOpenTransfer}
           affLink={affLink}
           handleAffLinkClick={handleAffLinkClick}
+          invitedUsers={invitedUsers}
         />
         <TransferModal
           t={t}
