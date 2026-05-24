@@ -97,6 +97,10 @@ const TopUp = () => {
     discount: {},
   });
 
+  // 当前用户分组是否被允许充值（GroupMinTopUp 未配置的非默认分组返回 false）
+  const [groupTopupAllowed, setGroupTopupAllowed] = useState(true);
+  const [groupTopupMessage, setGroupTopupMessage] = useState('');
+
   const confirmPayMethods = [
     ...payMethods,
     ...waffoPayMethods.map((method, index) => ({
@@ -175,6 +179,10 @@ const TopUp = () => {
   };
 
   const preTopUp = async (payment) => {
+    if (!groupTopupAllowed) {
+      showError(groupTopupMessage || t('当前分组未配置最低充值金额，请联系管理员'));
+      return;
+    }
     if (payment === 'stripe') {
       if (!enableStripeTopUp) {
         showError(t('管理员未开启Stripe充值！'));
@@ -319,6 +327,10 @@ const TopUp = () => {
   };
 
   const creemPreTopUp = async (product) => {
+    if (!groupTopupAllowed) {
+      showError(groupTopupMessage || t('当前分组未配置最低充值金额，请联系管理员'));
+      return;
+    }
     if (!enableCreemTopUp) {
       showError(t('管理员未开启 Creem 充值！'));
       return;
@@ -394,7 +406,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoAmount = async (value) => {
+  const getWaffoAmount = async (value, silent = false) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -409,7 +421,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!silent) {
+            Toast.error({ content: data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -457,7 +471,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoPancakeAmount = async (value) => {
+  const getWaffoPancakeAmount = async (value, silent = false) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -472,7 +486,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!silent) {
+            Toast.error({ content: data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -565,6 +581,11 @@ const TopUp = () => {
           discount: data.discount || {},
         });
 
+        // 分组充值闸口：未配置时禁止充值
+        const allowed = data.group_topup_allowed !== false;
+        setGroupTopupAllowed(allowed);
+        setGroupTopupMessage(data.group_topup_message || '');
+
         // 处理支付方式
         let payMethods = data.pay_methods || [];
         try {
@@ -655,8 +676,8 @@ const TopUp = () => {
             setPresetAmounts(generatePresetAmounts(minTopUpValue));
           }
 
-          // 初始化显示实付金额
-          getAmount(minTopUpValue);
+          // 初始化显示实付金额（系统触发的预览，静默处理，不弹错误提示）
+          getAmount(minTopUpValue, true);
         } catch (e) {
           setPayMethods([]);
         }
@@ -705,7 +726,7 @@ const TopUp = () => {
     return amount + ' ' + t('元');
   };
 
-  const getAmount = async (value) => {
+  const getAmount = async (value, silent = false) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -720,7 +741,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!silent) {
+            Toast.error({ content: data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -731,7 +754,7 @@ const TopUp = () => {
     setAmountLoading(false);
   };
 
-  const getStripeAmount = async (value) => {
+  const getStripeAmount = async (value, silent = false) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -746,7 +769,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!silent) {
+            Toast.error({ content: data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -882,6 +907,8 @@ const TopUp = () => {
         activeSubscriptions={activeSubscriptions}
         allSubscriptions={allSubscriptions}
         reloadSubscriptionSelf={getSubscriptionSelf}
+        groupTopupAllowed={groupTopupAllowed}
+        groupTopupMessage={groupTopupMessage}
       />
     </div>
   );

@@ -94,6 +94,8 @@ const RechargeCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  groupTopupAllowed = true,
+  groupTopupMessage = '',
 }) => {
   const onlineFormApiRef = useRef(null);
   const redeemFormApiRef = useRef(null);
@@ -118,6 +120,18 @@ const RechargeCard = ({
   }, [shouldShowSubscription, activeTab]);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
+      {/* 分组充值未配置时的警告横幅 */}
+      {!groupTopupAllowed && (
+        <Banner
+          type='warning'
+          description={
+            groupTopupMessage || t('当前分组未配置最低充值金额，请联系管理员')
+          }
+          closeIcon={null}
+          fullMode={false}
+          style={{ width: '100%' }}
+        />
+      )}
       {/* 统计数据 */}
       <Card
         className='!rounded-xl w-full'
@@ -315,6 +329,7 @@ const RechargeCard = ({
                             const isWaffoPancake =
                               payMethod.type === 'waffo_pancake';
                             const disabled =
+                              !groupTopupAllowed ||
                               (!enableOnlineTopUp &&
                                 !isStripe &&
                                 !isWaffo &&
@@ -462,26 +477,34 @@ const RechargeCard = ({
                         displaySave = (save / usdRate) * rate;
                       }
 
-                      return (
+                      const isBelowMin =
+                        Number(preset.value) < Number(minTopUp || 0);
+
+                      const cardEl = (
                         <Card
-                          key={index}
                           style={{
-                            cursor: 'pointer',
+                            cursor: isBelowMin ? 'not-allowed' : 'pointer',
+                            opacity: isBelowMin ? 0.5 : 1,
                             border:
-                              selectedPreset === preset.value
+                              !isBelowMin && selectedPreset === preset.value
                                 ? '2px solid var(--semi-color-primary)'
                                 : '1px solid var(--semi-color-border)',
                             height: '100%',
                             width: '100%',
                           }}
                           bodyStyle={{ padding: '12px' }}
-                          onClick={() => {
-                            selectPresetAmount(preset);
-                            onlineFormApiRef.current?.setValue(
-                              'topUpCount',
-                              preset.value,
-                            );
-                          }}
+                          onClick={
+                            isBelowMin
+                              ? undefined
+                              : () => {
+                                  selectPresetAmount(preset);
+                                  onlineFormApiRef.current?.setValue(
+                                    'topUpCount',
+                                    preset.value,
+                                  );
+                                }
+                          }
+                          aria-disabled={isBelowMin}
                         >
                           <div style={{ textAlign: 'center' }}>
                             <Typography.Title
@@ -518,6 +541,19 @@ const RechargeCard = ({
                           </div>
                         </Card>
                       );
+
+                      return isBelowMin ? (
+                        <Tooltip
+                          key={index}
+                          content={
+                            t('当前所在用户分组最低充值金额为') + ' ' + minTopUp
+                          }
+                        >
+                          {cardEl}
+                        </Tooltip>
+                      ) : (
+                        <React.Fragment key={index}>{cardEl}</React.Fragment>
+                      );
                     })}
                   </div>
                 </Form.Slot>
@@ -527,25 +563,35 @@ const RechargeCard = ({
               {enableCreemTopUp && creemProducts.length > 0 && (
                 <Form.Slot label={t('Creem 充值')}>
                   <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3'>
-                    {creemProducts.map((product, index) => (
-                      <Card
-                        key={index}
-                        onClick={() => creemPreTopUp(product)}
-                        className='cursor-pointer !rounded-2xl transition-all hover:shadow-md border-gray-200 hover:border-gray-300'
-                        bodyStyle={{ textAlign: 'center', padding: '16px' }}
-                      >
-                        <div className='font-medium text-lg mb-2'>
-                          {product.name}
-                        </div>
-                        <div className='text-sm text-gray-600 mb-2'>
-                          {t('充值额度')}: {product.quota}
-                        </div>
-                        <div className='text-lg font-semibold text-blue-600'>
-                          {product.currency === 'EUR' ? '€' : '$'}
-                          {product.price}
-                        </div>
-                      </Card>
-                    ))}
+                    {creemProducts.map((product, index) => {
+                      const disabled = !groupTopupAllowed;
+                      return (
+                        <Card
+                          key={index}
+                          onClick={
+                            disabled ? undefined : () => creemPreTopUp(product)
+                          }
+                          aria-disabled={disabled}
+                          className={
+                            disabled
+                              ? '!rounded-2xl border-gray-200 opacity-60 cursor-not-allowed'
+                              : 'cursor-pointer !rounded-2xl transition-all hover:shadow-md border-gray-200 hover:border-gray-300'
+                          }
+                          bodyStyle={{ textAlign: 'center', padding: '16px' }}
+                        >
+                          <div className='font-medium text-lg mb-2'>
+                            {product.name}
+                          </div>
+                          <div className='text-sm text-gray-600 mb-2'>
+                            {t('充值额度')}: {product.quota}
+                          </div>
+                          <div className='text-lg font-semibold text-blue-600'>
+                            {product.currency === 'EUR' ? '€' : '$'}
+                            {product.price}
+                          </div>
+                        </Card>
+                      );
+                    })}
                   </div>
                 </Form.Slot>
               )}

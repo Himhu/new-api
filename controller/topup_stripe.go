@@ -44,14 +44,12 @@ type StripeAdaptor struct {
 }
 
 func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
-	if req.Amount < getStripeMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getStripeMinTopup())})
+	group, minTopup, ok := resolveUserMinTopup(c, setting.StripeMinTopUp)
+	if !ok {
 		return
 	}
-	id := c.GetInt("id")
-	group, err := model.GetUserGroup(id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
+	if req.Amount < minTopup {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": belowMinTopupMessage(minTopup)})
 		return
 	}
 	payMoney := getStripePayMoney(float64(req.Amount), group)
@@ -67,8 +65,21 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "不支持的支付渠道"})
 		return
 	}
-	if req.Amount < getStripeMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("充值数量不能小于 %d", getStripeMinTopup()), "data": 10})
+
+	// Stripe 失败响应历史上把 message 置为业务错误、data 占位为 10，保留此约定避免破坏前端兼容性。
+	id := c.GetInt("id")
+	group, err := model.GetUserGroup(id, true)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "获取用户分组失败", "data": 10})
+		return
+	}
+	minTopup, err := resolveMinTopupForGroup(group, setting.StripeMinTopUp)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": minTopupErrorResponse(err), "data": 10})
+		return
+	}
+	if req.Amount < minTopup {
+		c.JSON(http.StatusOK, gin.H{"message": belowMinTopupMessage(minTopup), "data": 10})
 		return
 	}
 	if req.Amount > 10000 {
@@ -86,7 +97,6 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		return
 	}
 
-	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)
 	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
 
@@ -415,10 +425,3 @@ func getStripePayMoney(amount float64, group string) float64 {
 	return payMoney
 }
 
-func getStripeMinTopup() int64 {
-	minTopup := setting.StripeMinTopUp
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		minTopup = minTopup * int(common.QuotaPerUnit)
-	}
-	return int64(minTopup)
-}

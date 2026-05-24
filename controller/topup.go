@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,29 +23,99 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+
+// topupChannelMinimums 是 GetTopUpInfo 返回给前端的各渠道有效最低额（展示单位）。
+type topupChannelMinimums struct {
+	epay         int64
+	stripe       int64
+	waffo        int64
+	waffoPancake int64
+}
+
+// resolveTopupInfoMinimums 根据当前用户分组解析全部支付渠道的最低充值额。
+// 当分组未配置最低额时，allowed=false 且 message 携带说明；此时各 min 字段回落到渠道原始展示单位，
+// 便于前端在 UI 上继续渲染输入框，但提交按钮应被禁用。
+func resolveTopupInfoMinimums(c *gin.Context) (mins topupChannelMinimums, allowed bool, message string) {
+	mins = topupChannelMinimums{
+		epay:         convertMinTopupForDisplay(operation_setting.MinTopUp),
+		stripe:       convertMinTopupForDisplay(setting.StripeMinTopUp),
+		waffo:        convertMinTopupForDisplay(setting.WaffoMinTopUp),
+		waffoPancake: convertMinTopupForDisplay(setting.WaffoPancakeMinTopUp),
+	}
+	allowed = true
+
+	group, err := model.GetUserGroup(c.GetInt("id"), true)
+	if err != nil {
+		return mins, false, "获取用户分组失败"
+	}
+	epayMin, err := resolveMinTopupForGroup(group, operation_setting.MinTopUp)
+	if err != nil {
+		return mins, false, minTopupErrorResponse(err)
+	}
+	stripeMin, err := resolveMinTopupForGroup(group, setting.StripeMinTopUp)
+	if err != nil {
+		return mins, false, minTopupErrorResponse(err)
+	}
+	waffoMin, err := resolveMinTopupForGroup(group, setting.WaffoMinTopUp)
+	if err != nil {
+		return mins, false, minTopupErrorResponse(err)
+	}
+	waffoPancakeMin, err := resolveMinTopupForGroup(group, setting.WaffoPancakeMinTopUp)
+	if err != nil {
+		return mins, false, minTopupErrorResponse(err)
+	}
+	mins.epay = epayMin
+	mins.stripe = stripeMin
+	mins.waffo = waffoMin
+	mins.waffoPancake = waffoPancakeMin
+	return mins, allowed, ""
+}
+
+// clonePayMethods 深拷贝 operation_setting.PayMethods，避免后续按渠道改写 min_topup 时污染全局配置。
+func clonePayMethods(src []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(src))
+	for _, method := range src {
+		clone := make(map[string]string, len(method))
+		for k, v := range method {
+			clone[k] = v
+		}
+		out = append(out, clone)
+	}
+	return out
+}
+
+// overrideMinTopupForType 为 pay_methods 中指定 type 的项写入有效最低额。
+func overrideMinTopupForType(methods []map[string]string, methodType string, min int64) {
+	for _, method := range methods {
+		if method["type"] == methodType {
+			method["min_topup"] = strconv.FormatInt(min, 10)
+		}
+	}
+}
+
 func GetTopUpInfo(c *gin.Context) {
-	// 获取支付方式
-	payMethods := operation_setting.PayMethods
+	mins, groupTopupAllowed, groupTopupMessage := resolveTopupInfoMinimums(c)
+
+	// 拷贝避免后续 min_topup 改写污染全局 PayMethods 配置
+	payMethods := clonePayMethods(operation_setting.PayMethods)
 
 	// 如果启用了 Stripe 支付，添加到支付方法列表
-	if isStripeTopUpEnabled() {
-		// 检查是否已经包含 Stripe
+	enableStripe := isStripeTopUpEnabled()
+	if enableStripe {
 		hasStripe := false
 		for _, method := range payMethods {
-			if method["type"] == "stripe" {
+			if method["type"] == model.PaymentMethodStripe {
 				hasStripe = true
 				break
 			}
 		}
-
 		if !hasStripe {
-			stripeMethod := map[string]string{
+			payMethods = append(payMethods, map[string]string{
 				"name":      "Stripe",
-				"type":      "stripe",
+				"type":      model.PaymentMethodStripe,
 				"color":     "rgba(var(--semi-purple-5), 1)",
-				"min_topup": strconv.Itoa(setting.StripeMinTopUp),
-			}
-			payMethods = append(payMethods, stripeMethod)
+				"min_topup": strconv.FormatInt(mins.stripe, 10),
+			})
 		}
 	}
 
@@ -58,15 +129,13 @@ func GetTopUpInfo(c *gin.Context) {
 				break
 			}
 		}
-
 		if !hasWaffo {
-			waffoMethod := map[string]string{
+			payMethods = append(payMethods, map[string]string{
 				"name":      "Waffo (Global Payment)",
 				"type":      model.PaymentMethodWaffo,
 				"color":     "rgba(var(--semi-blue-5), 1)",
-				"min_topup": strconv.Itoa(setting.WaffoMinTopUp),
-			}
-			payMethods = append(payMethods, waffoMethod)
+				"min_topup": strconv.FormatInt(mins.waffo, 10),
+			})
 		}
 	}
 
@@ -79,23 +148,30 @@ func GetTopUpInfo(c *gin.Context) {
 				break
 			}
 		}
-
 		if !hasWaffoPancake {
 			payMethods = append(payMethods, map[string]string{
 				"name":      "Waffo Pancake",
 				"type":      model.PaymentMethodWaffoPancake,
 				"color":     "rgba(var(--semi-orange-5), 1)",
-				"min_topup": strconv.Itoa(setting.WaffoPancakeMinTopUp),
+				"min_topup": strconv.FormatInt(mins.waffoPancake, 10),
 			})
 		}
 	}
 
+	// 已存在于 PayMethods 配置（如 alipay/wxpay/自定义）的渠道不在上述追加分支中，
+	// 但 Stripe/Waffo/WaffoPancake 若被预置在 PayMethods 中，min_topup 也需以分组解析结果覆盖。
+	overrideMinTopupForType(payMethods, model.PaymentMethodStripe, mins.stripe)
+	overrideMinTopupForType(payMethods, model.PaymentMethodWaffo, mins.waffo)
+	overrideMinTopupForType(payMethods, model.PaymentMethodWaffoPancake, mins.waffoPancake)
+
 	data := gin.H{
 		"enable_online_topup":        isEpayTopUpEnabled(),
-		"enable_stripe_topup":        isStripeTopUpEnabled(),
+		"enable_stripe_topup":        enableStripe,
 		"enable_creem_topup":         isCreemTopUpEnabled(),
 		"enable_waffo_topup":         enableWaffo,
 		"enable_waffo_pancake_topup": enableWaffoPancake,
+		"group_topup_allowed":        groupTopupAllowed,
+		"group_topup_message":        groupTopupMessage,
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
@@ -104,10 +180,10 @@ func GetTopUpInfo(c *gin.Context) {
 		}(),
 		"creem_products":          setting.CreemProducts,
 		"pay_methods":             payMethods,
-		"min_topup":               operation_setting.MinTopUp,
-		"stripe_min_topup":        setting.StripeMinTopUp,
-		"waffo_min_topup":         setting.WaffoMinTopUp,
-		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
+		"min_topup":               mins.epay,
+		"stripe_min_topup":        mins.stripe,
+		"waffo_min_topup":         mins.waffo,
+		"waffo_pancake_min_topup": mins.waffoPancake,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 	}
@@ -178,14 +254,52 @@ func getPayMoney(amount int64, group string) float64 {
 	return payMoney.InexactFloat64()
 }
 
-func getMinTopup() int64 {
-	minTopup := operation_setting.MinTopUp
+// convertMinTopupForDisplay 在 TOKENS 展示模式下，将原始最低充值额放大为 Token 单位。
+func convertMinTopupForDisplay(minTopup int) int64 {
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dMinTopup := decimal.NewFromInt(int64(minTopup))
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		minTopup = int(dMinTopup.Mul(dQuotaPerUnit).IntPart())
+		return dMinTopup.Mul(dQuotaPerUnit).IntPart()
 	}
 	return int64(minTopup)
+}
+
+// resolveMinTopupForGroup 根据用户分组解析渠道有效最低充值额，并按当前展示单位换算。
+func resolveMinTopupForGroup(group string, baseMin int) (int64, error) {
+	resolved, err := operation_setting.ResolveMinTopUpForGroup(group, baseMin)
+	if err != nil {
+		return 0, err
+	}
+	return convertMinTopupForDisplay(resolved), nil
+}
+
+// minTopupErrorResponse 根据 resolve 错误返回前端友好的提示文本。
+func minTopupErrorResponse(err error) string {
+	if errors.Is(err, operation_setting.ErrGroupTopUpNotConfigured) {
+		return operation_setting.ErrGroupTopUpNotConfigured.Error()
+	}
+	return "获取用户分组失败"
+}
+
+// belowMinTopupMessage 生成「充值数量低于最低额度」的提示文本。
+func belowMinTopupMessage(min int64) string {
+	return fmt.Sprintf("充值数量不能小于 %d", min)
+}
+
+// resolveUserMinTopup 处理「拿用户分组 → 解析渠道最低额」这套通用前置逻辑。
+// 失败时直接写入响应并返回 false，调用方应立即 return。
+func resolveUserMinTopup(c *gin.Context, baseMin int) (group string, minTopup int64, ok bool) {
+	group, err := model.GetUserGroup(c.GetInt("id"), true)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
+		return "", 0, false
+	}
+	minTopup, err = resolveMinTopupForGroup(group, baseMin)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": minTopupErrorResponse(err)})
+		return "", 0, false
+	}
+	return group, minTopup, true
 }
 
 func RequestEpay(c *gin.Context) {
@@ -195,17 +309,17 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
 		return
 	}
-	if req.Amount < getMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+
+	group, minTopup, ok := resolveUserMinTopup(c, operation_setting.MinTopUp)
+	if !ok {
+		return
+	}
+	if req.Amount < minTopup {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": belowMinTopupMessage(minTopup)})
 		return
 	}
 
 	id := c.GetInt("id")
-	group, err := model.GetUserGroup(id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
-		return
-	}
 	payMoney := getPayMoney(req.Amount, group)
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
@@ -421,14 +535,12 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 
-	if req.Amount < getMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+	group, minTopup, ok := resolveUserMinTopup(c, operation_setting.MinTopUp)
+	if !ok {
 		return
 	}
-	id := c.GetInt("id")
-	group, err := model.GetUserGroup(id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
+	if req.Amount < minTopup {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": belowMinTopupMessage(minTopup)})
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)

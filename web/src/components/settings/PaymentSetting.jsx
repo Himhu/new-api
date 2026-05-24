@@ -42,6 +42,7 @@ const PaymentSetting = () => {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    GroupMinTopUp: '',
 
     StripeApiSecret: '',
     StripeWebhookSecret: '',
@@ -102,6 +103,17 @@ const PaymentSetting = () => {
               );
             } catch (error) {
               newInputs['AmountDiscount'] = item.value;
+            }
+            break;
+          case 'payment_setting.group_min_topup':
+            try {
+              newInputs['GroupMinTopUp'] = JSON.stringify(
+                JSON.parse(item.value),
+                null,
+                2,
+              );
+            } catch (error) {
+              newInputs['GroupMinTopUp'] = item.value;
             }
             break;
           case 'Price':

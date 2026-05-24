@@ -28,6 +28,16 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
+const PAYMENT_INPUT_FIELDS = [
+  'ServerAddress',
+  'CustomCallbackAddress',
+  'TopupGroupRatio',
+  'PayMethods',
+  'AmountOptions',
+  'AmountDiscount',
+  'GroupMinTopUp',
+];
+
 export default function SettingsGeneralPayment(props) {
   const { t } = useTranslation();
   const sectionTitle = props.hideSectionTitle ? undefined : t('通用设置');
@@ -39,6 +49,7 @@ export default function SettingsGeneralPayment(props) {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    GroupMinTopUp: '',
   });
   const [originInputs, setOriginInputs] = useState({});
   const formApiRef = useRef(null);
@@ -52,6 +63,7 @@ export default function SettingsGeneralPayment(props) {
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
+        GroupMinTopUp: props.options.GroupMinTopUp || '',
       };
       setInputs(currentInputs);
       setOriginInputs({ ...currentInputs });
@@ -60,7 +72,11 @@ export default function SettingsGeneralPayment(props) {
   }, [props.options]);
 
   const handleFormChange = (values) => {
-    setInputs(values);
+    const normalized = { ...values };
+    PAYMENT_INPUT_FIELDS.forEach((field) => {
+      normalized[field] = normalized[field] ?? '';
+    });
+    setInputs(normalized);
   };
 
   const submitGeneralSettings = async () => {
@@ -98,6 +114,15 @@ export default function SettingsGeneralPayment(props) {
       return;
     }
 
+    if (
+      originInputs.GroupMinTopUp !== inputs.GroupMinTopUp &&
+      inputs.GroupMinTopUp.trim() !== '' &&
+      !verifyJSON(inputs.GroupMinTopUp)
+    ) {
+      showError(t('分组最低充值金额配置不是合法的 JSON 对象'));
+      return;
+    }
+
     setLoading(true);
     try {
       const options = [
@@ -129,6 +154,12 @@ export default function SettingsGeneralPayment(props) {
         options.push({
           key: 'payment_setting.amount_discount',
           value: inputs.AmountDiscount,
+        });
+      }
+      if (originInputs.GroupMinTopUp !== inputs.GroupMinTopUp) {
+        options.push({
+          key: 'payment_setting.group_min_topup',
+          value: inputs.GroupMinTopUp,
         });
       }
 
@@ -234,6 +265,21 @@ export default function SettingsGeneralPayment(props) {
                 autosize
                 extraText={t(
                   '设置不同充值金额对应的折扣，键为充值金额，值为折扣率，例如：{"100": 0.95, "200": 0.9, "500": 0.85}',
+                )}
+              />
+            </Col>
+          </Row>
+          <Row style={{ marginTop: 16 }}>
+            <Col span={24}>
+              <Form.TextArea
+                field='GroupMinTopUp'
+                label={t('分组最低充值金额')}
+                placeholder={t(
+                  '为一个 JSON 对象，键为分组名（同充值分组倍率），值为该分组的最低充值数量，例如：{"vip": 100, "svip": 50}',
+                )}
+                autosize
+                extraText={t(
+                  'default 分组沿用各渠道原始最低额；其他分组必须在此显式配置，否则禁止充值。最终最低额取 max(渠道最低额, 分组最低额)。',
                 )}
               />
             </Col>
