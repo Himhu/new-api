@@ -36,6 +36,9 @@ export default function SettingsCreditLimit(props) {
     PreConsumedQuota: '',
     QuotaForInviter: '',
     QuotaForInvitee: '',
+    InviteRewardRatio: '',
+    InviteRewardSettleDays: '',
+    InviteRewardIncludeRedemption: true,
     'quota_setting.enable_free_model_pre_consume': true,
   });
   const refForm = useRef();
@@ -162,6 +165,55 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       QuotaForInvitee: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('邀请返利比例')}
+                  field={'InviteRewardRatio'}
+                  step={0.01}
+                  min={0}
+                  max={1}
+                  extraText={t('0 为关闭，0.05 表示 5% 返利')}
+                  placeholder={'0.05'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviteRewardRatio: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('返利冷冻天数')}
+                  field={'InviteRewardSettleDays'}
+                  step={1}
+                  min={0}
+                  suffix={t('天')}
+                  extraText={t('0 为即时入账，>0 为冷冻后自动入账')}
+                  placeholder={'7'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviteRewardSettleDays: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  label={t('兑换码触发返利')}
+                  field={'InviteRewardIncludeRedemption'}
+                  extraText={t('开启后，使用兑换码充值也会触发邀请返利')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviteRewardIncludeRedemption: value,
                     })
                   }
                 />

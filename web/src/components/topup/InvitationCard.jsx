@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Avatar,
   Typography,
@@ -28,11 +28,35 @@ import {
   Table,
   Tag,
 } from '@douyinfe/semi-ui';
-import { Copy, Users, BarChart2, TrendingUp, Gift, Zap } from 'lucide-react';
+import {
+  Copy,
+  Users,
+  BarChart2,
+  TrendingUp,
+  Gift,
+  Zap,
+  Clock,
+  Snowflake,
+} from 'lucide-react';
+
+import { renderQuota } from '../../helpers';
 
 const { Text } = Typography;
 
-const InvitedUserList = ({ t, invitedUsers }) => {
+const formatRemaining = (t, unlockAt, nowSec) => {
+  if (!unlockAt || unlockAt <= 0) return '';
+  const diff = unlockAt - nowSec;
+  if (diff <= 0) return t('即将入账');
+  const days = Math.floor(diff / 86400);
+  const hours = Math.floor((diff % 86400) / 3600);
+  const minutes = Math.floor((diff % 3600) / 60);
+  if (days > 0) return `${days}${t('天')}${hours}${t('小时')}`;
+  if (hours > 0) return `${hours}${t('小时')}${minutes}${t('分钟')}`;
+  if (minutes > 0) return `${minutes}${t('分钟')}`;
+  return `${diff}${t('秒')}`;
+};
+
+const InvitedUserList = ({ t, invitedUsers, nowSec }) => {
   if (!invitedUsers || invitedUsers.length === 0) {
     return (
       <Card className='!rounded-xl w-full' title={<Text type='tertiary'>{t('受邀用户')}</Text>}>
@@ -52,15 +76,38 @@ const InvitedUserList = ({ t, invitedUsers }) => {
       ),
     },
     {
-      title: t('状态'),
-      dataIndex: 'reward_status',
-      width: 80,
-      render: (rewardStatus) => {
-        const paid = rewardStatus === 'granted';
+      title: t('已入账'),
+      dataIndex: 'settled_quota',
+      width: 120,
+      render: (val) => (
+        <Text className='text-sm'>{renderQuota(val || 0)}</Text>
+      ),
+    },
+    {
+      title: t('冷冻中'),
+      dataIndex: 'pending_quota',
+      width: 200,
+      render: (val, record) => {
+        if (!val || val <= 0) {
+          return <Text type='tertiary' className='text-sm'>-</Text>;
+        }
+        const remaining = formatRemaining(t, record?.earliest_unlock_at, nowSec);
+        const count = record?.pending_count || 0;
         return (
-          <Tag size='small' type={paid ? 'solid' : 'ghost'} color={paid ? 'green' : 'orange'}>
-            {paid ? t('已付费') : t('待付费')}
-          </Tag>
+          <div className='flex flex-col gap-1'>
+            <Tag size='small' type='ghost' color='orange'>
+              {renderQuota(val)}
+            </Tag>
+            {(remaining || count > 1) && (
+              <div className='flex items-center gap-1'>
+                <Clock size={11} className='text-orange-500' />
+                <Text type='tertiary' className='!text-xs'>
+                  {remaining}
+                  {count > 1 ? ` · ${count}${t('笔')}` : ''}
+                </Text>
+              </div>
+            )}
+          </div>
         );
       },
     },
@@ -91,6 +138,20 @@ const InvitationCard = ({
   handleAffLinkClick,
   invitedUsers,
 }) => {
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const hasPending = (invitedUsers || []).some(
+      (u) => (u?.pending_quota || 0) > 0 && (u?.earliest_unlock_at || 0) > 0,
+    );
+    if (!hasPending) return undefined;
+    const timer = setInterval(() => {
+      setNowSec(Math.floor(Date.now() / 1000));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [invitedUsers]);
+
+  const pendingQuota = userState?.user?.aff_pending_quota || 0;
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -143,7 +204,7 @@ const InvitationCard = ({
               </div>
 
               {/* 统计数据 */}
-              <div className='grid grid-cols-3 gap-6 mt-4'>
+              <div className='grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4'>
                 {/* 待使用收益 */}
                 <div className='text-center'>
                   <div
@@ -165,6 +226,31 @@ const InvitationCard = ({
                       }}
                     >
                       {t('待使用收益')}
+                    </Text>
+                  </div>
+                </div>
+
+                {/* 冷冻金额 */}
+                <div className='text-center'>
+                  <div
+                    className='text-base sm:text-2xl font-bold mb-2'
+                    style={{ color: 'white' }}
+                  >
+                    {renderQuota(pendingQuota)}
+                  </div>
+                  <div className='flex items-center justify-center text-sm'>
+                    <Snowflake
+                      size={14}
+                      className='mr-1'
+                      style={{ color: 'rgba(255,255,255,0.8)' }}
+                    />
+                    <Text
+                      style={{
+                        color: 'rgba(255,255,255,0.8)',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {t('冷冻金额')}
                     </Text>
                   </div>
                 </div>
@@ -246,7 +332,7 @@ const InvitationCard = ({
       {/* 受邀用户 + 奖励说明 两栏布局 */}
       <div className='grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4'>
         <div className='lg:col-span-2'>
-          <InvitedUserList t={t} invitedUsers={invitedUsers} />
+          <InvitedUserList t={t} invitedUsers={invitedUsers} nowSec={nowSec} />
         </div>
         <div className='lg:col-span-1'>
           <Card
@@ -257,14 +343,14 @@ const InvitationCard = ({
               <div className='flex items-start gap-2'>
                 <Badge dot type='success' />
                 <Text type='tertiary' className='text-sm'>
-                  {t('邀请好友注册并在首次成功付费后，您可获得相应奖励')}
+                  {t('邀请好友注册后，好友每次充值您都可按比例获得返利')}
                 </Text>
               </div>
 
               <div className='flex items-start gap-2'>
                 <Badge dot type='success' />
                 <Text type='tertiary' className='text-sm'>
-                  {t('通过划转功能将奖励额度转入到您的账户余额中')}
+                  {t('返利设有冷冻期，冷冻期结束后自动入账')}
                 </Text>
               </div>
 

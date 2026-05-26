@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
@@ -383,6 +384,11 @@ func GetSelf(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	affPendingQuota, err := model.GetTotalPendingQuotaByInviterId(user.Id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// Hide admin remarks: set to empty to trigger omitempty tag, ensuring the remark field is not included in JSON returned to regular users
 	user.Remark = ""
 
@@ -412,7 +418,8 @@ func GetSelf(c *gin.Context) {
 		"aff_code":          user.AffCode,
 		"aff_count":         user.AffCount,
 		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
+		"aff_history_quota":  user.AffHistoryQuota,
+		"aff_pending_quota":  affPendingQuota,
 		"inviter_id":        user.InviterId,
 		"invited_count":     invitedCount,
 		"linux_do_id":       user.LinuxDOId,
@@ -969,13 +976,27 @@ func ManageUser(c *gin.Context) {
 			model.RecordLogWithAdminInfo(user.Id, model.LogTypeManage,
 				fmt.Sprintf("管理员减少用户额度 %s", logger.LogQuota(req.Value)), adminInfo)
 		case "override":
-			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			err := model.DB.Transaction(func(tx *gorm.DB) error {
+				var freshUser model.User
+				if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", user.Id).First(&freshUser).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+					return err
+				}
+				if req.Value == 0 {
+					if _, err := model.RevokePendingRebatesForInvitee(tx, user.Id); err != nil {
+						return fmt.Errorf("revoke pending invite rebates for user %d: %w", user.Id, err)
+					}
+				}
+				model.RecordLogWithAdminInfo(user.Id, model.LogTypeManage,
+					fmt.Sprintf("管理员覆盖用户额度从 %s 为 %s", logger.LogQuota(freshUser.Quota), logger.LogQuota(req.Value)), adminInfo)
+				return nil
+			})
+			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
-			model.RecordLogWithAdminInfo(user.Id, model.LogTypeManage,
-				fmt.Sprintf("管理员覆盖用户额度从 %s 为 %s", logger.LogQuota(oldQuota), logger.LogQuota(req.Value)), adminInfo)
 		default:
 			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 			return

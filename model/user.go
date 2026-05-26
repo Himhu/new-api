@@ -322,25 +322,58 @@ func GetInvitedUserCountByInviterId(inviterId int) (int64, error) {
 }
 
 type InvitedUserInfo struct {
-	Id           int    `json:"id"`
-	Username     string `json:"username"`
-	DisplayName  string `json:"display_name"`
-	Status       int    `json:"status"`
-	RewardStatus string `json:"reward_status"`
+	Id               int    `json:"id"`
+	Username         string `json:"username"`
+	DisplayName      string `json:"display_name"`
+	Status           int    `json:"status"`
+	SettledQuota     int    `json:"settled_quota"`
+	PendingQuota     int    `json:"pending_quota"`
+	PendingCount     int    `json:"pending_count"`
+	EarliestUnlockAt int64  `json:"earliest_unlock_at"`
 }
 
 func GetInvitedUsersByInviterId(inviterId int) ([]InvitedUserInfo, error) {
 	if inviterId <= 0 {
 		return []InvitedUserInfo{}, nil
 	}
-	var users []InvitedUserInfo
-	err := DB.Model(&User{}).
-		Select("users.id, users.username, users.display_name, users.status, COALESCE(invite_reward_records.status, 'pending') as reward_status").
-		Joins("LEFT JOIN invite_reward_records ON users.id = invite_reward_records.invitee_user_id").
-		Where("users.inviter_id = ?", inviterId).
-		Order("users.id DESC").
-		Find(&users).Error
-	return users, err
+	var users []struct {
+		Id          int
+		Username    string
+		DisplayName string
+		Status      int
+	}
+	if err := DB.Model(&User{}).Select("id, username, display_name, status").
+		Where("inviter_id = ?", inviterId).Order("id DESC").Find(&users).Error; err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return []InvitedUserInfo{}, nil
+	}
+	ids := make([]int, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.Id)
+	}
+	aggs, err := GetInviteRewardSummaryByInviteeIds(ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]InvitedUserInfo, 0, len(users))
+	for _, u := range users {
+		info := InvitedUserInfo{
+			Id:          u.Id,
+			Username:    u.Username,
+			DisplayName: u.DisplayName,
+			Status:      u.Status,
+		}
+		if agg, ok := aggs[u.Id]; ok {
+			info.SettledQuota = agg.SettledQuota
+			info.PendingQuota = agg.PendingQuota
+			info.PendingCount = agg.PendingCount
+			info.EarliestUnlockAt = agg.EarliestUnlockAt
+		}
+		result = append(result, info)
+	}
+	return result, nil
 }
 
 func DeleteUserById(id int) (err error) {
@@ -443,9 +476,7 @@ func (user *User) Insert(inviterId int) error {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
-		if common.QuotaForInviter > 0 {
-			_ = ensurePendingInviteRewardRecord(user.Id, inviterId)
-		}
+		_ = IncreaseInviterCount(inviterId)
 	}
 	return nil
 }
@@ -502,9 +533,7 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
-		if common.QuotaForInviter > 0 {
-			_ = ensurePendingInviteRewardRecord(user.Id, inviterId)
-		}
+		_ = IncreaseInviterCount(inviterId)
 	}
 }
 

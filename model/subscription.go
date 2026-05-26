@@ -559,6 +559,14 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		logPlanTitle = plan.Title
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
+
+		subQuota := int(order.Money * common.QuotaPerUnit)
+		if subQuota > 0 {
+			if err := IssueInviteRebate(tx, order.UserId, subQuota, InviteRewardTriggerSubscription, tradeNo, order.PaymentMethod); err != nil {
+				return fmt.Errorf("issue invite rebate for subscription: %w", err)
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -570,7 +578,6 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	if logUserId > 0 {
 		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
 		RecordLog(logUserId, LogTypeTopup, msg)
-		_ = GrantInviterRewardOnFirstPaidEvent(logUserId, InviteRewardTriggerSubscription, tradeNo, logPaymentMethod)
 	}
 	return nil
 }

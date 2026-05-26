@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 
@@ -502,25 +503,34 @@ func EpayNotify(c *gin.Context) {
 			return
 		}
 		if topUp.Status == common.TopUpStatusPending {
-			topUp.Status = common.TopUpStatusSuccess
-			err := topUp.Update()
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新充值订单失败 trade_no=%s user_id=%d client_ip=%s error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), err.Error(), common.GetJsonString(topUp)))
-				return
-			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
 			dAmount := decimal.NewFromInt(int64(topUp.Amount))
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新用户额度失败 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, err.Error(), common.GetJsonString(topUp)))
+
+			txErr := model.DB.Transaction(func(tx *gorm.DB) error {
+				topUp.Status = common.TopUpStatusSuccess
+				topUp.CompleteTime = common.GetTimestamp()
+				if err := tx.Save(topUp).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.User{}).Where("id = ?", topUp.UserId).
+					Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+					return err
+				}
+				if err := model.IssueInviteRebate(tx, topUp.UserId, quotaToAdd, model.InviteRewardTriggerTopUp, topUp.TradeNo, topUp.PaymentMethod); err != nil {
+					return fmt.Errorf("issue invite rebate for epay topup: %w", err)
+				}
+				return nil
+			})
+			if txErr != nil {
+				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 事务充值失败 trade_no=%s user_id=%d client_ip=%s error=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), txErr.Error()))
 				return
 			}
-			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, topUp.Money, common.GetJsonString(topUp)))
+			if err := model.InvalidateUserCache(topUp.UserId); err != nil {
+				common.SysLog(fmt.Sprintf("failed to invalidate user cache after epay topup user_id=%d: %s", topUp.UserId, err.Error()))
+			}
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, topUp.Money))
 			model.RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), c.ClientIP(), topUp.PaymentMethod, "epay")
-			_ = model.GrantInviterRewardOnFirstPaidEvent(topUp.UserId, model.InviteRewardTriggerTopUp, topUp.TradeNo, topUp.PaymentMethod)
 		}
 	} else {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 忽略事件 trade_no=%s callback_type=%s trade_status=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, c.ClientIP(), common.GetJsonString(verifyInfo)))

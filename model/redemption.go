@@ -145,7 +145,16 @@ func Redeem(key string, userId int) (quota int, err error) {
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
 		err = tx.Save(redemption).Error
-		return err
+		if err != nil {
+			return err
+		}
+		if common.InviteRewardIncludeRedemption {
+			tradeNo := fmt.Sprintf("redemption:%d", redemption.Id)
+			if err := IssueInviteRebate(tx, userId, redemption.Quota, InviteRewardTriggerRedemption, tradeNo, "redemption"); err != nil {
+				return fmt.Errorf("issue invite rebate for redemption: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())

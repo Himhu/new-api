@@ -263,6 +263,14 @@ func migrateDB() error {
 		return err
 	}
 
+	if err := migrateInviteRewardUniqueIndex(); err != nil {
+		return err
+	}
+
+	if common.UsingSQLite {
+		fixSQLiteDecimalDefaults()
+	}
+
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
@@ -310,6 +318,13 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migrateInviteRewardUniqueIndex(); err != nil {
+		return err
+	}
+
+	if common.UsingSQLite {
+		fixSQLiteDecimalDefaults()
+	}
 
 	var wg sync.WaitGroup
 
@@ -719,4 +734,45 @@ func PingDB() error {
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
 	return nil
+}
+
+// migrateInviteRewardUniqueIndex drops the legacy uniqueIndex on invitee_user_id
+// so the new per-topup rebate model can store multiple rows per invitee.
+// Safe to call repeatedly — no-op when the index doesn't exist.
+func migrateInviteRewardUniqueIndex() error {
+	migrator := DB.Migrator()
+	if !migrator.HasTable(&InviteRewardRecord{}) {
+		return nil
+	}
+	if migrator.HasIndex(&InviteRewardRecord{}, "idx_invite_reward_records_invitee_user_id") {
+		if err := migrator.DropIndex(&InviteRewardRecord{}, "idx_invite_reward_records_invitee_user_id"); err != nil {
+			return fmt.Errorf("drop legacy invitee_user_id unique index: %w", err)
+		}
+	}
+	if migrator.HasIndex(&InviteRewardRecord{}, "uni_invite_reward_records_invitee_user_id") {
+		if err := migrator.DropIndex(&InviteRewardRecord{}, "uni_invite_reward_records_invitee_user_id"); err != nil {
+			return fmt.Errorf("drop legacy invitee_user_id unique index: %w", err)
+		}
+	}
+	return nil
+}
+
+// fixSQLiteMonitoringTables works around a glebarez/sqlite bug where AlterColumn
+// generates invalid DDL for columns with decimal(p,s) type. Monitoring stats
+// tables are ephemeral caches rebuilt every cycle, so dropping them is safe.
+// fixSQLiteDecimalDefaults works around a glebarez/sqlite@v1.9.0 bug:
+// AlterColumn's regex .*?(,|\\)\\s*$) incorrectly splits decimal(p,s)
+// at the inner comma, producing invalid DDL. We preemptively drop any
+// table whose DDL would trigger this bug. AutoMigrate recreates them.
+func fixSQLiteDecimalDefaults() {
+	var results []struct {
+		Name string
+		Sql  string
+	}
+	DB.Raw("SELECT name, sql FROM sqlite_master WHERE type='table' AND sql IS NOT NULL").Scan(&results)
+	for _, r := range results {
+		if strings.Contains(r.Sql, "decimal") && strings.Contains(r.Sql, "DEFAULT -") {
+			DB.Exec("DROP TABLE IF EXISTS `" + r.Name + "`")
+		}
+	}
 }
