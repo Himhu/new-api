@@ -1,9 +1,11 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -335,6 +337,43 @@ type IncompleteDetails struct {
 	Reasoning string `json:"reasoning"`
 }
 
+// ToolCallArguments holds the `arguments` payload of a Responses API function call.
+// OpenAI spec emits it as a JSON-stringified object, but some upstream relays (e.g. Codex 号池)
+// send a raw JSON value instead. Accept either shape on the wire; when this DTO is re-marshaled
+// (chat-compat conversions), emit as a JSON string. Transparent passthrough paths forward the
+// original bytes unchanged.
+type ToolCallArguments string
+
+func (a *ToolCallArguments) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*a = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := common.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		*a = ToolCallArguments(s)
+		return nil
+	}
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		*a = ToolCallArguments(trimmed)
+		return nil
+	}
+	var s string
+	if err := common.Unmarshal(trimmed, &s); err != nil {
+		return err
+	}
+	*a = ToolCallArguments(s)
+	return nil
+}
+
+func (a ToolCallArguments) MarshalJSON() ([]byte, error) {
+	return common.Marshal(string(a))
+}
+
 type ResponsesOutput struct {
 	Type      string                   `json:"type"`
 	ID        string                   `json:"id"`
@@ -345,7 +384,7 @@ type ResponsesOutput struct {
 	Size      string                   `json:"size"`
 	CallId    string                   `json:"call_id,omitempty"`
 	Name      string                   `json:"name,omitempty"`
-	Arguments string                   `json:"arguments,omitempty"`
+	Arguments ToolCallArguments        `json:"arguments,omitempty"`
 }
 
 type ResponsesOutputContent struct {

@@ -408,7 +408,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				toolCallNameByID[callID] = name
 			}
 
-			newArgs := streamResp.Item.Arguments
+			newArgs := string(streamResp.Item.Arguments)
 			prevArgs := toolCallArgsByID[callID]
 			argsDelta := ""
 			if newArgs != "" {
