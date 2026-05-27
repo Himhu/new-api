@@ -843,6 +843,7 @@
     "划转到余额": "Transférer au solde",
     "划转邀请额度": "Quota d'invitation de transfert",
     "划转金额最低为": "Le montant minimum du virement est de",
+    "可用邀请额度不足": "Quota d'invitation disponible insuffisant",
     "划转额度": "Montant du virement",
     "列出的模型将不会自动添加或移除-thinking/-nothinking 后缀": "Les modèles listés ici n'ajouteront ni ne retireront automatiquement le suffixe -thinking/-nothinking.",
     "列设置": "Colonnes",

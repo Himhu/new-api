@@ -17,8 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useContext, useRef } from 'react';
-import { API, showError, showSuccess, renderQuota, copy, getQuotaPerUnit } from '../helpers';
+import React, { useEffect, useState, useContext, useRef, useMemo } from 'react';
+import {
+  API,
+  showError,
+  showSuccess,
+  renderQuota,
+  copy,
+  getQuotaPerUnit,
+  getCurrencyConfig,
+} from '../helpers';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../context/User';
 import InvitationCard from '../components/topup/InvitationCard';
@@ -32,6 +40,21 @@ const InviteRewardPage = () => {
   const [transferAmount, setTransferAmount] = useState(0);
   const [invitedUsers, setInvitedUsers] = useState([]);
   const affFetchedRef = useRef(false);
+
+  const currencyConfig = useMemo(() => getCurrencyConfig(), []);
+  const quotaPerUnit = getQuotaPerUnit();
+  const affQuota = userState?.user?.aff_quota || 0;
+
+  const minTransferAmount = currencyConfig.rate;
+  const maxTransferAmount = quotaPerUnit > 0
+    ? (affQuota / quotaPerUnit) * currencyConfig.rate
+    : 0;
+
+  const amountToQuota = (amount) =>
+    Math.round((Number(amount) / currencyConfig.rate) * quotaPerUnit);
+
+  const minAmountLabel = () =>
+    `${currencyConfig.symbol}${Number.isFinite(minTransferAmount) ? minTransferAmount.toFixed(2) : '0.00'}`;
 
   const getUserQuota = async () => {
     const res = await API.get('/api/user/self');
@@ -54,11 +77,16 @@ const InviteRewardPage = () => {
   };
 
   const transfer = async () => {
-    if (transferAmount < getQuotaPerUnit()) {
-      showError(t('划转金额最低为') + ' ' + renderQuota(getQuotaPerUnit()));
+    const quota = amountToQuota(transferAmount);
+    if (!Number.isFinite(quota) || quota < quotaPerUnit) {
+      showError(t('划转金额最低为') + ' ' + minAmountLabel());
       return;
     }
-    const res = await API.post('/api/user/aff_transfer', { quota: transferAmount });
+    if (quota > affQuota) {
+      showError(t('可用邀请额度不足'));
+      return;
+    }
+    const res = await API.post('/api/user/aff_transfer', { quota });
     const { success, message } = res.data;
     if (success) {
       showSuccess(message);
@@ -76,7 +104,7 @@ const InviteRewardPage = () => {
 
   useEffect(() => {
     getUserQuota();
-    setTransferAmount(getQuotaPerUnit());
+    setTransferAmount(minTransferAmount);
   }, []);
 
   useEffect(() => {
@@ -112,9 +140,9 @@ const InviteRewardPage = () => {
           openTransfer={openTransfer}
           transfer={transfer}
           handleTransferCancel={() => setOpenTransfer(false)}
-          userState={userState}
-          renderQuota={renderQuota}
-          getQuotaPerUnit={getQuotaPerUnit}
+          currencySymbol={currencyConfig.symbol}
+          minTransferAmount={minTransferAmount}
+          maxTransferAmount={maxTransferAmount}
           transferAmount={transferAmount}
           setTransferAmount={setTransferAmount}
         />

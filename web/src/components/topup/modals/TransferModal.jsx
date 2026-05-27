@@ -21,14 +21,19 @@ import React from 'react';
 import { Modal, Typography, Input, InputNumber } from '@douyinfe/semi-ui';
 import { CreditCard } from 'lucide-react';
 
+const formatAmount = (symbol, value) => {
+  const num = Number(value);
+  return `${symbol}${Number.isFinite(num) ? num.toFixed(2) : '0.00'}`;
+};
+
 const TransferModal = ({
   t,
   openTransfer,
   transfer,
   handleTransferCancel,
-  userState,
-  renderQuota,
-  getQuotaPerUnit,
+  currencySymbol,
+  minTransferAmount,
+  maxTransferAmount,
   transferAmount,
   setTransferAmount,
 }) => {
@@ -52,20 +57,22 @@ const TransferModal = ({
             {t('可用邀请额度')}
           </Typography.Text>
           <Input
-            value={renderQuota(userState?.user?.aff_quota)}
+            value={formatAmount(currencySymbol, maxTransferAmount)}
             disabled
             className='!rounded-lg'
           />
         </div>
         <div>
           <Typography.Text strong className='block mb-2'>
-            {t('划转额度')} · {t('最低') + renderQuota(getQuotaPerUnit())}
+            {t('划转额度')} ·{' '}
+            {t('最低') + ' ' + formatAmount(currencySymbol, minTransferAmount)}
           </Typography.Text>
           <InputNumber
-            min={getQuotaPerUnit()}
-            max={userState?.user?.aff_quota || 0}
             value={transferAmount}
             onChange={(value) => setTransferAmount(value)}
+            prefix={currencySymbol}
+            precision={2}
+            step={0.01}
             className='w-full !rounded-lg'
           />
         </div>
