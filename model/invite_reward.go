@@ -170,7 +170,6 @@ func IssueInviteRebate(tx *gorm.DB, inviteeUserId int, sourceAmount int, trigger
 	}
 
 	if err := tx.Model(&User{}).Where("id = ?", record.InviterUserId).Updates(map[string]interface{}{
-		"quota":       gorm.Expr("quota + ?", record.RewardQuota),
 		"aff_quota":   gorm.Expr("aff_quota + ?", record.RewardQuota),
 		"aff_history": gorm.Expr("aff_history + ?", record.RewardQuota),
 	}).Error; err != nil {
@@ -299,7 +298,6 @@ func settleOneInviteRebate(id int) (bool, error) {
 			return nil
 		}
 		if err := tx.Model(&User{}).Where("id = ?", record.InviterUserId).Updates(map[string]interface{}{
-			"quota":       gorm.Expr("quota + ?", record.RewardQuota),
 			"aff_quota":   gorm.Expr("aff_quota + ?", record.RewardQuota),
 			"aff_history": gorm.Expr("aff_history + ?", record.RewardQuota),
 		}).Error; err != nil {
