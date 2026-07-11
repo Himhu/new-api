@@ -12,6 +12,53 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// allowedUpstreamHeaders lists response headers we relay to end clients.
+// Everything else — upstream Request-Id, rate-limit, tracing, server identity —
+// is dropped so downstream cannot observe which upstream we called.
+var allowedUpstreamHeaders = func() map[string]struct{} {
+	names := []string{
+		"Content-Type",
+		"Content-Encoding",
+		"Content-Language",
+		"Content-Disposition",
+		"Content-Range",
+		"Accept-Ranges",
+		"Cache-Control",
+		"ETag",
+		"Last-Modified",
+		"Expires",
+		"Retry-After",
+		"Vary",
+	}
+	m := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		m[http.CanonicalHeaderKey(n)] = struct{}{}
+	}
+	return m
+}()
+
+// SanitizeUpstreamHeaders copies whitelisted response headers from src to dst,
+// dropping any header that could leak upstream identity or per-request IDs.
+// Content-Length is never copied; each caller sets its own.
+func SanitizeUpstreamHeaders(dst, src http.Header) {
+	if dst == nil || src == nil {
+		return
+	}
+	for key, values := range src {
+		canonical := http.CanonicalHeaderKey(key)
+		if canonical == "Content-Length" {
+			continue
+		}
+		if _, ok := allowedUpstreamHeaders[canonical]; !ok {
+			continue
+		}
+		dst.Del(canonical)
+		for _, v := range values {
+			dst.Add(canonical, v)
+		}
+	}
+}
+
 func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	if httpResponse == nil || httpResponse.Body == nil {
 		return
@@ -34,13 +81,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	// So the httpClient will be confused by the response.
 	// For example, Postman will report error, and we cannot check the response at all.
 	if src != nil {
-		for k, v := range src.Header {
-			// avoid setting Content-Length
-			if k == "Content-Length" {
-				continue
-			}
-			c.Writer.Header().Set(k, v[0])
-		}
+		SanitizeUpstreamHeaders(c.Writer.Header(), src.Header)
 	}
 
 	// set Content-Length header manually BEFORE calling WriteHeader
