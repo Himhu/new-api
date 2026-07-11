@@ -21,6 +21,10 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
 		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+			// Override the default max-age=604800 from middleware.Cache() so CDNs
+			// (Cloudflare) do not cache the 404 for a week — that would strand any
+			// browser tab still referencing an old content-hashed asset.
+			c.Header("Cache-Control", "no-store")
 			controller.RelayNotFound(c)
 			return
 		}
