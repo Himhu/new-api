@@ -487,45 +487,65 @@ func EpayNotify(c *gin.Context) {
 	}
 
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
-		LockOrder(verifyInfo.ServiceTradeNo)
-		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		topUp := model.GetTopUpByTradeNo(verifyInfo.ServiceTradeNo)
-		if topUp == nil {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调订单不存在 trade_no=%s callback_type=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), common.GetJsonString(verifyInfo)))
-			return
-		}
-		if isNonEpayPaymentMethodForEpayCallback(topUp.PaymentMethod) {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付方式不匹配 trade_no=%s order_payment_method=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
-			return
-		}
-		if topUp.PaymentMethod != verifyInfo.Type {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付方式不匹配 trade_no=%s order_payment_method=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
-			return
-		}
-		if topUp.Status == common.TopUpStatusPending {
+		topUp := &model.TopUp{}
+		quotaToAdd := 0
+		credited := false
+
+		txErr := model.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+				Where("trade_no = ?", verifyInfo.ServiceTradeNo).First(topUp).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调订单不存在 trade_no=%s callback_type=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), common.GetJsonString(verifyInfo)))
+					return nil
+				}
+				return err
+			}
+			if isNonEpayPaymentMethodForEpayCallback(topUp.PaymentMethod) || topUp.PaymentMethod != verifyInfo.Type {
+				logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付方式不匹配 trade_no=%s order_payment_method=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
+				return nil
+			}
+			if topUp.Status != common.TopUpStatusPending {
+				return nil
+			}
+
 			dAmount := decimal.NewFromInt(int64(topUp.Amount))
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-
-			txErr := model.DB.Transaction(func(tx *gorm.DB) error {
-				topUp.Status = common.TopUpStatusSuccess
-				topUp.CompleteTime = common.GetTimestamp()
-				if err := tx.Save(topUp).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&model.User{}).Where("id = ?", topUp.UserId).
-					Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
-					return err
-				}
-				if err := model.IssueInviteRebate(tx, topUp.UserId, quotaToAdd, model.InviteRewardTriggerTopUp, topUp.TradeNo, topUp.PaymentMethod); err != nil {
-					return fmt.Errorf("issue invite rebate for epay topup: %w", err)
-				}
-				return nil
-			})
-			if txErr != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 事务充值失败 trade_no=%s user_id=%d client_ip=%s error=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), txErr.Error()))
-				return
+			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+			if quotaToAdd <= 0 {
+				return fmt.Errorf("invalid epay quota_to_add=%d for trade_no=%s", quotaToAdd, topUp.TradeNo)
 			}
+
+			completeTime := common.GetTimestamp()
+			casRes := tx.Model(&model.TopUp{}).
+				Where("id = ? AND status = ?", topUp.Id, common.TopUpStatusPending).
+				Updates(map[string]interface{}{
+					"status":        common.TopUpStatusSuccess,
+					"complete_time": completeTime,
+				})
+			if casRes.Error != nil {
+				return casRes.Error
+			}
+			if casRes.RowsAffected == 0 {
+				return nil
+			}
+			topUp.Status = common.TopUpStatusSuccess
+			topUp.CompleteTime = completeTime
+
+			if err := tx.Model(&model.User{}).Where("id = ?", topUp.UserId).
+				Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+				return err
+			}
+			if err := model.IssueInviteRebate(tx, topUp.UserId, quotaToAdd, model.InviteRewardTriggerTopUp, topUp.TradeNo, topUp.PaymentMethod); err != nil {
+				return fmt.Errorf("issue invite rebate for epay topup: %w", err)
+			}
+			credited = true
+			return nil
+		})
+		if txErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 事务充值失败 trade_no=%s user_id=%d client_ip=%s error=%q", verifyInfo.ServiceTradeNo, topUp.UserId, c.ClientIP(), txErr.Error()))
+			return
+		}
+		if credited {
 			if err := model.InvalidateUserCache(topUp.UserId); err != nil {
 				common.SysLog(fmt.Sprintf("failed to invalidate user cache after epay topup user_id=%d: %s", topUp.UserId, err.Error()))
 			}
